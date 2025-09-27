@@ -100,7 +100,6 @@ def register_link_institution(institution_id: str, db: Session) -> Dict[str, Any
         "fetch_resources": institution.resources or ["ACCOUNTS", "TRANSACTIONS", "BALANCES"],
         **credentials,
     }
-    print(payload)
 
     url = f"{BASE}/links/"
     try:
@@ -141,22 +140,111 @@ def get_link_by_bank(bank_name: str, db: Session) -> str:
 
 def get_account_kpis(account_id: str, link_id: str) -> Dict:
     url = f"{BASE}/transactions/"
-    params = {"account": account_id, "link": link_id, "page_size": 200}
-    r = requests.get(url, auth=HTTPBasicAuth(settings.BELVO_CLIENT_ID, settings.BELVO_SECRET), params=params, timeout=15)
+    params = {"account": account_id, "link": link_id, "page_size": 1000}
+    r = requests.get(
+        url,
+        auth=HTTPBasicAuth(settings.BELVO_CLIENT_ID, settings.BELVO_SECRET),
+        params=params,
+        timeout=15
+    )
 
     if r.status_code != 200:
-        raise HTTPException(status_code=r.status_code, detail=r.json())
+        try:
+            error_detail = r.json()
+        except ValueError:
+            error_detail = r.text
+        raise HTTPException(status_code=r.status_code, detail=error_detail)
 
     data = r.json()
     txs = data.get("results", [])
 
-    ingresos = sum(t["amount"] for t in txs if t.get("type") == "INFLOW" and t.get("status") == "PROCESSED")
-    ingresos_pendientes = sum(t["amount"] for t in txs if t.get("type") == "INFLOW" and t.get("status") == "PENDING")
-    egresos = sum(abs(t["amount"]) for t in txs if t.get("type") == "OUTFLOW" and t.get("status") == "PROCESSED")
-    egresos_pendientes = sum(abs(t["amount"]) for t in txs if t.get("type") == "OUTFLOW" and t.get("status") == "PENDING")
+    if not txs:
+        url = f"{BASE}/accounts/{account_id}/"
+        r = requests.get(
+            url,
+            auth=HTTPBasicAuth(settings.BELVO_CLIENT_ID, settings.BELVO_SECRET),
+            timeout=15
+        )
+        if r.status_code != 200:
+            try:
+                error_detail = r.json()
+            except ValueError:
+                error_detail = r.text
+            raise HTTPException(status_code=r.status_code, detail=error_detail)
 
-    balance = ingresos - egresos
-    account_currency = txs[0]["account"]["currency"] if txs else None
+        data = r.json()
+        balance = data.get('balance',0)['current']
+        category = data.get('category')
+        account_currency = data.get('currency')
+
+        if category == 'PENSION_FUND_ACCOUNT':
+            funds_data = data.get('funds_data', [])
+            balance = sum(fd.get('balance', 0) for fd in funds_data)
+        return {
+            "balance": balance,
+            "ingresos": 0,
+            "ingresos_pendientes": 0,
+            "egresos": 0,
+            "egresos_pendientes": 0,
+            "aportes_netos": 0,
+            "ganancia_neta": 0,
+            "rentabilidad": 0,
+            "account_currency": account_currency,
+            "account_category": category,
+            "transactions": []
+        }
+    
+    account = txs[0]['account']
+    category = account.get('category')
+    account_currency = account.get('currency')
+
+    balance = 0
+    ingresos = egresos = ingresos_pendientes = egresos_pendientes = 0
+    aportes_netos = ganancia_neta = rentabilidad = 0
+
+    # -------------------------
+    # Pension Fund Accounts
+    # -------------------------
+    if category == "PENSION_FUND_ACCOUNT":
+        funds_data = account.get('funds_data', [])
+        balance = sum(fd.get('balance', 0) for fd in funds_data)
+
+        aportes = sum(t["amount"] for t in txs if t.get("type") == "INFLOW" and t.get("status") == "PROCESSED")
+        retiros = sum(abs(t["amount"]) for t in txs if t.get("type") == "OUTFLOW" and t.get("status") == "PROCESSED")
+
+        aportes_netos = aportes - retiros
+        ganancia_neta = balance - aportes_netos
+        rentabilidad = (ganancia_neta / aportes_netos * 100) if aportes_netos > 0 else 0
+
+    # -------------------------
+    # Credit Cards
+    # -------------------------
+    elif category == "CREDIT_CARD":
+        balance = account.get("balance", {}).get("current", 0)
+        ingresos = sum(t["amount"] for t in txs if t.get("type") == "INFLOW" and t.get("status") == "PROCESSED")
+        egresos = sum(abs(t["amount"]) for t in txs if t.get("type") == "OUTFLOW" and t.get("status") == "PROCESSED")
+        ingresos_pendientes = sum(t["amount"] for t in txs if t.get("type") == "INFLOW" and t.get("status") == "PENDING")
+        egresos_pendientes = sum(abs(t["amount"]) for t in txs if t.get("type") == "OUTFLOW" and t.get("status") == "PENDING")
+
+    # -------------------------
+    # Loan Accounts
+    # -------------------------
+    elif category == "LOAN_ACCOUNT":
+        balance = account.get("balance", {}).get("current", 0)
+        ingresos = sum(t["amount"] for t in txs if t.get("type") == "INFLOW" and t.get("status") == "PROCESSED")
+        ingresos_pendientes = sum(t["amount"] for t in txs if t.get("type") == "INFLOW" and t.get("status") == "PENDING")
+        egresos = sum(abs(t["amount"]) for t in txs if t.get("type") == "OUTFLOW" and t.get("status") == "PROCESSED")
+        egresos_pendientes = sum(abs(t["amount"]) for t in txs if t.get("type") == "OUTFLOW" and t.get("status") == "PENDING")
+
+    # -------------------------
+    # Checking / Savings Accounts
+    # -------------------------
+    else:
+        ingresos = sum(t["amount"] for t in txs if t.get("type") == "INFLOW" and t.get("status") == "PROCESSED")
+        ingresos_pendientes = sum(t["amount"] for t in txs if t.get("type") == "INFLOW" and t.get("status") == "PENDING")
+        egresos = sum(abs(t["amount"]) for t in txs if t.get("type") == "OUTFLOW" and t.get("status") == "PROCESSED")
+        egresos_pendientes = sum(abs(t["amount"]) for t in txs if t.get("type") == "OUTFLOW" and t.get("status") == "PENDING")
+        balance = account.get("balance", {}).get("current", ingresos - egresos)
 
     return {
         "balance": balance,
@@ -165,6 +253,9 @@ def get_account_kpis(account_id: str, link_id: str) -> Dict:
         "egresos": egresos,
         "egresos_pendientes": egresos_pendientes,
         "account_currency": account_currency,
+        "account_category": category,
+        "aportes_netos": aportes_netos,
+        "ganancia_neta": ganancia_neta,
+        "rentabilidad": rentabilidad,
         "transactions": txs
     }
-

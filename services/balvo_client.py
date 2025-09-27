@@ -22,7 +22,7 @@ class BelvoClient:
         """Get all available institutions (banks)."""
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"{self.base_url}/api/institutions/",
+                f"{self.base_url}/api/institutions/?country_code__in=BR,MX",
                 headers=self.headers
             )
             response.raise_for_status()

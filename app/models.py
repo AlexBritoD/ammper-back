@@ -24,7 +24,7 @@ class Link(Base):
 class Institution(Base):
     __tablename__ = "institutions"
 
-    id = Column(String, primary_key=True, index=True)   # Belvo manda "1013" como string en la API
+    id = Column(String, primary_key=True, index=True)   
     code = Column(String, nullable=True)
     name = Column(String, nullable=False)
     display_name = Column(String, nullable=True)
@@ -36,9 +36,9 @@ class Institution(Base):
     logo = Column(String, nullable=True)
     icon_logo = Column(String, nullable=True)
     text_logo = Column(String, nullable=True)
-    form_fields = Column(JSONB, nullable=True)  # array con los campos dinámicos
-    features = Column(JSONB, nullable=True)     # lista
+    form_fields = Column(JSONB, nullable=True) 
+    features = Column(JSONB, nullable=True)    
     integration_type = Column(String, nullable=True)
     status = Column(String, nullable=True)
-    resources = Column(JSONB, nullable=True)    # lista
+    resources = Column(JSONB, nullable=True)   
     openbanking_information = Column(JSONB, nullable=True)  
