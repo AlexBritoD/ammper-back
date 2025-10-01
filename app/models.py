@@ -14,11 +14,20 @@ class User(Base):
 class Link(Base):
     __tablename__ = "links"
 
-    id = Column(String, primary_key=True, index=True) 
-    institution = Column(String, index=True, nullable=False)
-    status = Column(String, nullable=False)
-    fetch_resources = Column(JSON, nullable=True)
+    id = Column(String, primary_key=True, index=True)
+    institution = Column(String, nullable=False)
+    access_mode = Column(String)
+    last_accessed_at = Column(String)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    external_id = Column(String)
+    institution_user_id = Column(String)
+    status = Column(String, nullable=False)
+    created_by = Column(String)
+    refresh_rate = Column(String)
+    credentials_storage = Column(String)
+    fetch_resources = Column(JSON)
+    stale_in = Column(String)
+    credentials = Column(JSON)
 
 
 class Institution(Base):

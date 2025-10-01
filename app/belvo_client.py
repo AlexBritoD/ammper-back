@@ -38,7 +38,6 @@ def list_institutions(page: int = 1, per_page: int = 50, db: Optional[Session] =
         db.commit()
     finally:
         db.close()
-
     return institutions
 
 def get_institution(institution_id: str) -> Dict[str, Any]:
@@ -70,10 +69,11 @@ def register_link_institution(institution_id: str, db: Session) -> Dict[str, Any
     institution = db.query(models.Institution).filter(models.Institution.name == institution_id).first()
     if not institution:
         raise HTTPException(status_code=404, detail="Institución no encontrada en la base de datos")
-
+    
     existing_link: Optional[models.Link] = (
         db.query(models.Link).filter(models.Link.institution == institution.name).first()
     )
+    
     if existing_link and existing_link.status == "valid":
         return {
             "id": existing_link.id,
@@ -81,7 +81,7 @@ def register_link_institution(institution_id: str, db: Session) -> Dict[str, Any
             "status": existing_link.status,
             "fetch_resources": existing_link.fetch_resources,
         }
-
+    
     form_fields = institution.form_fields or []
     credentials = {}
     for field in form_fields:
@@ -89,44 +89,41 @@ def register_link_institution(institution_id: str, db: Session) -> Dict[str, Any
         pattern = field.get("validation")
         credentials[name] = rstr.xeger(pattern) if pattern else "test123"
         if field['type'] == 'select':
-            if institution.name == 'ofmockbank_br_retail':
-                credentials[name] = "103"
-            credentials[name] = "003"
-
+            values = field.get("values", [])
+            if values:
+                pre_selected_index = field.get("pre_selected", 0)
+                credentials[name] = values[pre_selected_index]["code"]
+    
     if institution.name == 'ofmockbank_br_retail':
         credentials['username_type'] = "103"
+    
     payload = {
         "institution": institution.name,
         "fetch_resources": institution.resources or ["ACCOUNTS", "TRANSACTIONS", "BALANCES"],
         **credentials,
     }
-
+    
     url = f"{BASE}/links/"
     try:
         r = requests.post(url, auth=auth, json=payload, timeout=15)
         r.raise_for_status()
         data = r.json()
     except requests.exceptions.HTTPError:
-        
         try:
             error_data = r.json()
         except Exception:
             error_data = {"detail": "Error desconocido al registrar el link"}
         raise HTTPException(status_code=r.status_code, detail=error_data)
-
+    
+    data['credentials'] = credentials
     if existing_link:
-        existing_link.id = data["id"]
-        existing_link.status = data["status"]
-        existing_link.fetch_resources = data["fetch_resources"]
+        for key, value in data.items():
+            if hasattr(existing_link, key):
+                setattr(existing_link, key, value)
     else:
-        new_link = models.Link(
-            id=data["id"],
-            institution=data["institution"],
-            status=data["status"],
-            fetch_resources=data["fetch_resources"],
-        )
+        new_link = models.Link(**{k: v for k, v in data.items() if hasattr(models.Link, k)})
         db.add(new_link)
-
+    
     db.commit()
     return data
 
